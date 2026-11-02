@@ -98,11 +98,11 @@ Modular Python package (`crypto_forecast`) operating under a dual-resolution sam
 |---|------|-------|-------------|--------|
 | M1 | Market Data Ingestion & Technical Features | Binance REST `/api/v3/klines`, Yahoo Finance fallback, dual-resolution resampling (1h, 1d), missing data imputation, technical indicators (RSI, MACD, BB, ATR, OBV) | none | DONE |
 | M2 | CryptoBERT Sentiment Engine | `ElKulako/cryptobert` Hugging Face model integration, keyless RSS news scraping (CoinTelegraph, CoinDesk), polarity scoring, exponential decay aggregation | M1 | DONE |
-| M3 | Multi-Horizon Forecasting Engine | `BaseForecaster` interface, `timesfm-2.5` primary wrapper, `chronos-2`/`chronos-bolt` wrappers, `granite-ttm` wrapper, `persistence` baseline forecaster, sentiment drift adjustment | M1, M2 | IN_PROGRESS |
-| M4 | Quantitative Benchmarking & Compatibility | Vectorized metrics (MAE, RMSE, sMAPE, Hit-Rate), walk-forward backtester, multi-asset compatibility matrix across 7 coins (BTC, ETH, SOL, BNB, ADA, DOGE, XRP), `scripts/run_benchmark.py` | M1, M3 | PLANNED |
-| M5 | Interactive Colab Web GUI & Plotly Cones | Gradio Blocks dashboard, Plotly candlestick + shaded forecast cones (`fill='tonexty'`), 11-horizon forecast breakdown table, model accuracy scoreboard, `share=True` tunnel, `demo.queue(1)` | M3, M4 | PLANNED |
-| M6 | Colab Runner Notebook & GitHub Packaging | `notebooks/colab_runner.ipynb` 1-click execution, Colab CLI headless runner, remote repo sync from `greencube-dev-boop`, `pyproject.toml`, `requirements.txt`, README | M1, M2, M3, M4, M5 | PLANNED |
-| M7 | Final Milestone: E2E Verification & Hardening | 100% pass of E2E Test Suite published in `TEST_READY.md` (Tiers 1-4), followed by Tier 5 adversarial coverage hardening | M6, TEST_READY.md | PLANNED |
+| M3 | Multi-Horizon Forecasting Engine | `BaseForecaster` interface, `timesfm-2.5` primary wrapper, `chronos-2`/`chronos-bolt` wrappers, `granite-ttm` wrapper, `persistence` baseline forecaster, sentiment drift adjustment | M1, M2 | DONE |
+| M4 | Quantitative Benchmarking & Compatibility | Vectorized metrics (MAE, RMSE, sMAPE, Hit-Rate), walk-forward backtester, multi-asset compatibility matrix across 7 coins (BTC, ETH, SOL, BNB, ADA, DOGE, XRP), `scripts/run_benchmark.py` | M1, M3 | DONE |
+| M5 | Interactive Colab Web GUI & Plotly Cones | Gradio Blocks dashboard, Plotly candlestick + shaded forecast cones (`fill='tonexty'`), 11-horizon forecast breakdown table, model accuracy scoreboard, `share=True` tunnel, `demo.queue(1)` | M3, M4 | DONE |
+| M6 | Colab Runner Notebook & GitHub Packaging | `notebooks/colab_runner.ipynb` 1-click execution, Colab CLI headless runner, remote repo sync from `greencube-dev-boop`, `pyproject.toml`, `requirements.txt`, README | M1, M2, M3, M4, M5 | DONE |
+| M7 | Final Milestone: E2E Verification & Hardening | 100% pass of E2E Test Suite published in `TEST_READY.md` (Tiers 1-4), followed by Tier 5 adversarial coverage hardening | M6, TEST_READY.md | DONE |
 
 ## Interface Contracts
 
