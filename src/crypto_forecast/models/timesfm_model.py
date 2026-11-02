@@ -219,10 +219,14 @@ class TimesFMForecaster(BaseForecaster):
                 torch_compile=False,
             )
 
-            # Move to CUDA / FP16 if available
-            if resolved_device.type == "cuda" and self.use_fp16:
-                model = model.to(torch.float16)
-            elif resolved_device.type != "cpu":
+            # Optimize precision and place underlying PyTorch module on target device
+            if resolved_device.type == "cuda":
+                torch.set_float32_matmul_precision("high")
+
+            if hasattr(model, "model") and hasattr(model.model, "to"):
+                model.model = model.model.to(resolved_device)
+                model.model.device = resolved_device
+            elif hasattr(model, "to") and callable(model.to):
                 model = model.to(resolved_device)
 
             # Compile inference configuration

@@ -35,6 +35,7 @@ from crypto_forecast.config import (
 )
 from crypto_forecast.data.ingestion import (
     BinanceAPIError,
+    BinanceGeoBlockedError,
     canonicalize_symbol,
     DataIngestionError,
     fetch_binance_klines,
@@ -789,3 +790,151 @@ def test_fetch_ohlcv_all_sources_fail_raises():
     ):
       with pytest.raises(DataIngestionError):
         fetch_ohlcv("BTC/USDT", source="auto")
+
+
+def test_binance_klines_http_451_immediate_abort_zero_delay():
+  """Asserts HTTP 451 immediately raises BinanceGeoBlockedError with status_code=451 and 0s sleep."""
+  resp_451 = MagicMock(
+      status_code=451,
+      headers={},
+      text="Service unavailable from a restricted location",
+  )
+  with (
+      patch("requests.Session.get", return_value=resp_451) as mock_get,
+      patch("time.sleep") as mock_sleep,
+  ):
+    with pytest.raises(BinanceGeoBlockedError) as exc_info:
+      fetch_binance_klines("BTC/USDT", limit=10, max_retries=5)
+
+    assert exc_info.value.status_code == 451
+    # Must abort on the very first attempt without looping
+    assert mock_get.call_count == 1
+    # Must NOT call time.sleep (zero backoff delay)
+    mock_sleep.assert_not_called()
+
+
+def test_binance_ticker_http_451_immediate_abort_zero_delay():
+  """Asserts HTTP 451 on ticker immediately raises BinanceGeoBlockedError with 0s sleep."""
+  resp_451 = MagicMock(
+      status_code=451,
+      headers={},
+      text="Service unavailable from a restricted location",
+  )
+  with (
+      patch("requests.Session.get", return_value=resp_451) as mock_get,
+      patch("time.sleep") as mock_sleep,
+  ):
+    with pytest.raises(BinanceGeoBlockedError) as exc_info:
+      fetch_binance_ticker("BTC/USDT", max_retries=5)
+
+    assert exc_info.value.status_code == 451
+    assert mock_get.call_count == 1
+    mock_sleep.assert_not_called()
+
+
+def test_fetch_binance_klines_custom_base_url():
+  """Asserts base_url parameter properly directs request to Binance US."""
+  mock_resp = MagicMock(
+      status_code=200,
+      headers={},
+      json=MagicMock(return_value=make_kline_batch(5)),
+  )
+  with patch("requests.Session.get", return_value=mock_resp) as mock_get:
+    df = fetch_binance_klines(
+        "BTC/USDT", limit=5, base_url="https://api.binance.us"
+    )
+
+  assert len(df) == 5
+  called_url = mock_get.call_args[0][0]
+  assert called_url == "https://api.binance.us/api/v3/klines"
+
+
+def test_fetch_ohlcv_http_451_fallback_to_binance_us():
+  """Asserts HTTP 451 on Binance Global immediately routes to Binance US with 0s delay."""
+  resp_451 = MagicMock(
+      status_code=451,
+      headers={},
+      text="Geo-blocked",
+  )
+  resp_us_200 = MagicMock(
+      status_code=200,
+      headers={},
+      json=MagicMock(return_value=make_kline_batch(10)),
+  )
+
+  def mock_get(url, *args, **kwargs):
+    if "api.binance.com" in url:
+      return resp_451
+    if "api.binance.us" in url:
+      return resp_us_200
+    raise ValueError(f"Unexpected url: {url}")
+
+  with (
+      patch("requests.Session.get", side_effect=mock_get) as mock_req,
+      patch("crypto_forecast.data.ingestion.fetch_yahoo_ohlcv") as mock_yahoo,
+      patch("time.sleep") as mock_sleep,
+  ):
+    df = fetch_ohlcv("BTC/USDT", interval="1h", limit=10, source="auto")
+
+  assert len(df) == 10
+  assert mock_req.call_count == 2
+  # Binance Global called first, Binance US called second
+  assert "api.binance.com" in mock_req.call_args_list[0][0][0]
+  assert "api.binance.us" in mock_req.call_args_list[1][0][0]
+  # Yahoo Finance was bypassed because Binance US succeeded
+  assert not mock_yahoo.called
+  # Zero backoff sleep was invoked
+  mock_sleep.assert_not_called()
+
+
+def test_fetch_ohlcv_http_451_cascade_to_yahoo_finance():
+  """Asserts HTTP 451 on both Binance Global and Binance US immediately cascades to Yahoo Finance."""
+  resp_451 = MagicMock(
+      status_code=451,
+      headers={},
+      text="Geo-blocked",
+  )
+  yahoo_df = pd.DataFrame({
+      "timestamp": pd.date_range("2026-01-01", periods=10, freq="1h", tz="UTC"),
+      "open": [78000.0] * 10,
+      "high": [78500.0] * 10,
+      "low": [77800.0] * 10,
+      "close": [78200.0] * 10,
+      "volume": [100.0] * 10,
+  })
+  yahoo_df.index = pd.DatetimeIndex(yahoo_df["timestamp"], tz="UTC")
+
+  with (
+      patch("requests.Session.get", return_value=resp_451) as mock_req,
+      patch(
+          "crypto_forecast.data.ingestion.fetch_yahoo_ohlcv",
+          return_value=yahoo_df,
+      ) as mock_yahoo,
+      patch("time.sleep") as mock_sleep,
+  ):
+    df = fetch_ohlcv("BTC/USDT", interval="1h", limit=10, source="auto")
+
+  assert len(df) == 10
+  # Binance Global called first, Binance US called second, then Yahoo
+  assert mock_req.call_count == 2
+  assert mock_yahoo.called
+  mock_sleep.assert_not_called()
+
+
+def test_fetch_ohlcv_force_source_binance_us():
+  """Asserts source='binance_us' directly queries Binance US and raises on failure."""
+  resp_500 = MagicMock(
+      status_code=500,
+      headers={},
+      text="Internal Server Error",
+  )
+  with (
+      patch("requests.Session.get", return_value=resp_500),
+      patch("time.sleep"),
+      patch("crypto_forecast.data.ingestion.fetch_yahoo_ohlcv") as mock_yahoo,
+  ):
+    with pytest.raises(BinanceAPIError):
+      fetch_ohlcv("BTC/USDT", source="binance_us")
+
+    assert not mock_yahoo.called
+

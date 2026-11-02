@@ -11,6 +11,7 @@ from crypto_forecast.data.indicators import (
 )
 from crypto_forecast.data.ingestion import (
     BinanceAPIError,
+    BinanceGeoBlockedError,
     canonicalize_symbol,
     DataIngestionError,
     fetch_binance_klines,
@@ -47,6 +48,7 @@ __all__ = [
     "normalize_symbol_for_yahoo",
     "DataIngestionError",
     "BinanceAPIError",
+    "BinanceGeoBlockedError",
     "RateLimitExceededError",
     "YahooFinanceError",
     # Preprocessor

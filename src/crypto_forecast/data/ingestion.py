@@ -28,6 +28,7 @@ from crypto_forecast.config import (
     BINANCE_KLINES_PATH,
     BINANCE_SYMBOL_MAP,
     BINANCE_TICKER_24HR_PATH,
+    BINANCE_US_BASE_URL,
     BINANCE_WEIGHT_LIMIT_1M,
     BINANCE_WEIGHT_WARN_THRESHOLD,
     DEFAULT_BACKOFF_BASE,
@@ -66,6 +67,18 @@ class BinanceAPIError(DataIngestionError):
     super().__init__(message)
     self.status_code = status_code
     self.error_code = error_code
+
+
+class BinanceGeoBlockedError(BinanceAPIError):
+  """Raised immediately when Binance returns HTTP 451 (Geo-blocked/Restricted Location)."""
+
+  def __init__(
+      self,
+      message: str,
+      status_code: int = 451,
+      error_code: int | None = None,
+  ) -> None:
+    super().__init__(message, status_code=status_code, error_code=error_code)
 
 
 class RateLimitExceededError(BinanceAPIError):
@@ -189,6 +202,7 @@ def fetch_binance_klines(
     end_time: int | None = None,
     max_retries: int = DEFAULT_MAX_RETRIES,
     session: requests.Session | None = None,
+    base_url: str = BINANCE_BASE_URL,
 ) -> pd.DataFrame:
   """Fetches historical and real-time OHLCV candles from Binance public REST API.
 
@@ -203,6 +217,7 @@ def fetch_binance_klines(
       end_time: Optional end timestamp in milliseconds.
       max_retries: Max retry attempts on network error or HTTP 429.
       session: Optional requests.Session instance for connection reuse.
+      base_url: Base URL for Binance REST API (Binance Global or Binance US).
 
   Returns:
       pd.DataFrame with columns ['timestamp', 'open', 'high', 'low', 'close',
@@ -210,13 +225,14 @@ def fetch_binance_klines(
       indexed by a continuous UTC DatetimeIndex.
 
   Raises:
+      BinanceGeoBlockedError: If Binance returns HTTP 451 (geo-blocked).
       BinanceAPIError: If parameters are invalid or exchange errors out.
       RateLimitExceededError: If rate limit cannot be resolved within
       max_retries.
   """
   req_session = session or requests.Session()
   binance_symbol = normalize_symbol_for_binance(symbol)
-  url = f"{BINANCE_BASE_URL}{BINANCE_KLINES_PATH}"
+  url = f"{base_url}{BINANCE_KLINES_PATH}"
 
   all_raw_candles: list[list[Any]] = []
   total_needed = max(1, limit)
@@ -240,6 +256,17 @@ def fetch_binance_klines(
           raise BinanceAPIError(
               "Binance HTTP 418 IP auto-ban detected. Aborting.",
               status_code=418,
+          )
+
+        if resp.status_code == 451:
+          logger.warning(
+              "Binance HTTP 451 Geo-restriction detected for %s at %s. Aborting retries immediately.",
+              binance_symbol,
+              url,
+          )
+          raise BinanceGeoBlockedError(
+              f"Binance HTTP 451 Geo-restriction: {resp.text}",
+              status_code=451,
           )
 
         if resp.status_code == 429:
@@ -390,6 +417,7 @@ def fetch_binance_ticker(
     symbol: str,
     max_retries: int = DEFAULT_MAX_RETRIES,
     session: requests.Session | None = None,
+    base_url: str = BINANCE_BASE_URL,
 ) -> dict[str, Any]:
   """Fetches 24-hour rolling ticker statistics and real-time spot price from Binance.
 
@@ -397,6 +425,7 @@ def fetch_binance_ticker(
       symbol: Cryptocurrency symbol (e.g. 'BTC/USDT').
       max_retries: Retry attempts.
       session: Optional requests session.
+      base_url: Base URL for Binance REST API (Binance Global or Binance US).
 
   Returns:
       Standardized dictionary with float metrics and UTC timestamps:
@@ -420,7 +449,7 @@ def fetch_binance_ticker(
   req_session = session or requests.Session()
   binance_symbol = normalize_symbol_for_binance(symbol)
   canonical = canonicalize_symbol(symbol)
-  url = f"{BINANCE_BASE_URL}{BINANCE_TICKER_24HR_PATH}"
+  url = f"{base_url}{BINANCE_TICKER_24HR_PATH}"
 
   for attempt in range(max_retries):
     try:
@@ -462,6 +491,21 @@ def fetch_binance_ticker(
             ),
             "trades_count": int(data.get("count", 0)),
         }
+
+      if resp.status_code in (418, 451):
+        reason = "IP auto-ban" if resp.status_code == 418 else "Geo-restriction"
+        logger.warning(
+            "Binance ticker HTTP %d %s detected for %s at %s. Aborting retries immediately.",
+            resp.status_code,
+            reason,
+            binance_symbol,
+            url,
+        )
+        exc_cls = BinanceGeoBlockedError if resp.status_code == 451 else BinanceAPIError
+        raise exc_cls(
+            f"Binance ticker HTTP {resp.status_code} {reason}: {resp.text}",
+            status_code=resp.status_code,
+        )
 
       if resp.status_code == 429:
         sleep_sec = _compute_backoff_sleep(attempt)
@@ -643,6 +687,7 @@ def fetch_ohlcv(
     start_time: int | None = None,
     end_time: int | None = None,
     source: str = "auto",
+    session: requests.Session | None = None,
 ) -> pd.DataFrame:
   """Unified entry point for OHLCV candlestick data with automated exchange fallback.
 
@@ -651,13 +696,19 @@ def fetch_ohlcv(
   'close', 'volume']
   indexed by a continuous UTC DatetimeIndex.
 
+  Fallback sequence when source='auto':
+  1. Binance Global (https://api.binance.com)
+  2. Binance US (https://api.binance.us) - immediate failover on HTTP 451 or failure
+  3. Yahoo Finance (yfinance / direct chart API) - secondary fallback
+
   Args:
       symbol: Canonical cryptocurrency symbol (e.g. 'BTC/USDT').
       interval: Resolution ('1h', '1d', etc.).
       limit: Requested candle count.
       start_time: Optional start timestamp (epoch ms).
       end_time: Optional end timestamp (epoch ms).
-      source: Ingestion source: 'auto', 'binance', or 'yahoo'.
+      source: Ingestion source: 'auto', 'binance', 'binance_us', or 'yahoo'.
+      session: Optional requests.Session instance for connection reuse.
 
   Returns:
       Sanitized, verified DataFrame with strict OHLCV columns and UTC
@@ -668,6 +719,7 @@ def fetch_ohlcv(
   """
   clean_source = source.strip().lower()
 
+  # Tier 1: Primary Binance Global
   if clean_source in ("auto", "binance"):
     try:
       df = fetch_binance_klines(
@@ -676,6 +728,8 @@ def fetch_ohlcv(
           limit=limit,
           start_time=start_time,
           end_time=end_time,
+          session=session,
+          base_url=BINANCE_BASE_URL,
       )
       if not df.empty:
         return df
@@ -683,15 +737,46 @@ def fetch_ohlcv(
       if clean_source == "binance":
         raise
       logger.warning(
-          "Primary Binance fetch failed for %s (%s). Falling back to Yahoo"
-          " Finance.",
+          "Primary Binance fetch failed for %s (%s). Attempting Binance US fallback.",
           symbol,
           exc,
       )
 
+  # Tier 2: Binance US Fallback
+  if clean_source in ("auto", "binance_us"):
+    try:
+      df_us = fetch_binance_klines(
+          symbol=symbol,
+          interval=interval,
+          limit=limit,
+          start_time=start_time,
+          end_time=end_time,
+          session=session,
+          base_url=BINANCE_US_BASE_URL,
+      )
+      if not df_us.empty:
+        logger.info(
+            "Successfully fetched %d candles from Binance US for %s.",
+            len(df_us),
+            symbol,
+        )
+        return df_us
+    except Exception as exc:
+      if clean_source == "binance_us":
+        raise
+      logger.warning(
+          "Binance US fetch failed for %s (%s). Falling back to Yahoo Finance.",
+          symbol,
+          exc,
+      )
+
+  # Tier 3: Yahoo Finance Fallback
   if clean_source in ("auto", "yahoo"):
     try:
-      df_yahoo = fetch_yahoo_ohlcv(symbol=symbol, interval=interval)
+      if session is not None:
+        df_yahoo = fetch_yahoo_ohlcv(symbol=symbol, interval=interval, session=session)
+      else:
+        df_yahoo = fetch_yahoo_ohlcv(symbol=symbol, interval=interval)
       if len(df_yahoo) > limit:
         df_yahoo = df_yahoo.iloc[-limit:].copy()
         df_yahoo.index = pd.DatetimeIndex(df_yahoo["timestamp"], tz="UTC")

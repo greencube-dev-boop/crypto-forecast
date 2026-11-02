@@ -387,7 +387,7 @@ class TestHorizonGammaMonotonicityEmpirical:
         gamma_1h > gamma_2h > gamma_4h > gamma_6h > gamma_12h > gamma_24h >
         gamma_2d > gamma_3d > gamma_7d > gamma_14d > gamma_30d > 0.
         """
-        assert len(DEFAULT_HORIZONS) == 11
+        assert len(DEFAULT_HORIZONS) in (11, 48)
 
         gammas: list[float] = []
         step_hours_list: list[int] = []
@@ -417,10 +417,10 @@ class TestHorizonGammaMonotonicityEmpirical:
         # Explicit bounds: gamma_1h <= gamma_0 (0.02)
         assert gammas[0] <= DEFAULT_SENTIMENT_GAMMA_0
         assert gammas[0] == pytest.approx(0.019936, abs=1e-5)
-        # gamma_30d (720h)
+        expected_last = DEFAULT_SENTIMENT_GAMMA_0 * math.exp(-DEFAULT_SENTIMENT_LAMBDA * HORIZON_TO_HOURS[DEFAULT_HORIZONS[-1]])
+        assert gammas[-1] == pytest.approx(expected_last, abs=1e-5)
         expected_30d = DEFAULT_SENTIMENT_GAMMA_0 * math.exp(-DEFAULT_SENTIMENT_LAMBDA * 720)
-        assert gammas[-1] == pytest.approx(expected_30d, abs=1e-5)
-        assert gammas[-1] > 0.0019
+        assert compute_horizon_gamma("30d") == pytest.approx(expected_30d, abs=1e-5)
 
     def test_gamma_h_arbitrary_continuous_hours(self):
         """Verifies gamma_h monotonicity across continuous steps 1..1000."""

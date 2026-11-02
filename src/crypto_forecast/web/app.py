@@ -30,6 +30,7 @@ from crypto_forecast.web.components import (
     build_forecast_table_rows,
     build_scoreboard_markdown,
 )
+from crypto_forecast.web.export import export_forecast_to_csv
 
 logger = logging.getLogger(__name__)
 
@@ -58,8 +59,8 @@ def run_forecast_pipeline(
     coin: str,
     model_choice: str,
     apply_sentiment: bool = True,
-) -> tuple[Any, list[list[Any]], str]:
-    """Generates chart, tabular breakdown, and scoreboard for UI."""
+) -> tuple[Any, list[list[Any]], str, str | None]:
+    """Generates chart, tabular breakdown, scoreboard, and CSV export for UI."""
     clean_sym = coin.strip().upper()
     full_sym = f"{clean_sym}/USDT"
 
@@ -69,7 +70,7 @@ def run_forecast_pipeline(
     except Exception as e:
         logger.info(f"Using synthetic prices for {coin}: {e}")
         prices = _generate_synthetic_prices(clean_sym, n_bars=200)
-        now = pd.Timestamp.utcnow()
+        now = pd.Timestamp.now(tz="UTC")
         timestamps = pd.date_range(end=now, periods=len(prices), freq="1h")
         df = pd.DataFrame(
             {
@@ -83,6 +84,8 @@ def run_forecast_pipeline(
         )
 
     prices = df["close"].values
+    cutoff_time = df["timestamp"].iloc[-1] if "timestamp" in df and len(df) else pd.Timestamp.now(tz="UTC")
+    current_price = float(prices[-1])
 
     # 2. Sentiment drift
     polarity = None
@@ -102,12 +105,24 @@ def run_forecast_pipeline(
     forecaster = resolve_forecaster(model_choice)
     predictions = forecaster.forecast(prices, horizons=DEFAULT_HORIZONS, sentiment_polarity=polarity)
 
-    # 4. Format outputs
+    # 4. Format outputs & CSV export
     fig = create_forecast_cone_chart(df, predictions, symbol=clean_sym, model_name=model_choice)
-    table_rows = build_forecast_table_rows(predictions)
+    table_rows = build_forecast_table_rows(predictions, current_time=cutoff_time, current_price=current_price)
     scoreboard_md = build_scoreboard_markdown(clean_sym, model_choice, predictions)
 
-    return fig, table_rows, scoreboard_md
+    local_csv, drive_csv = export_forecast_to_csv(
+        table_rows,
+        symbol=clean_sym,
+        current_time=cutoff_time,
+        current_price=current_price,
+    )
+
+    if drive_csv:
+        scoreboard_md += f"\n- **Google Drive Export:** Successfully saved to `{drive_csv}`\n"
+    else:
+        scoreboard_md += "\n- **Google Drive Export:** Google Drive not mounted or inaccessible. CSV saved locally for direct download.\n"
+
+    return fig, table_rows, scoreboard_md, local_csv
 
 
 def build_reference_gradio_app() -> gr.Blocks:
@@ -115,8 +130,8 @@ def build_reference_gradio_app() -> gr.Blocks:
     with gr.Blocks(title="Multi-Horizon Cryptocurrency Forecasting System") as demo:
         gr.Markdown("# 🚀 Multi-Horizon Cryptocurrency Price Forecasting")
         gr.Markdown(
-            "Predict cryptocurrency prices across 11 discrete horizons "
-            "(1h, 2h, 4h, 6h, 12h, 24h, 2d, 3d, 7d, 14d, 30d) using SOTA Foundation Transformers."
+            "Predict cryptocurrency prices across 48 continuous hourly horizons "
+            "(1h through 48h) using SOTA Foundation Transformers."
         )
 
         with gr.Row():
@@ -140,17 +155,23 @@ def build_reference_gradio_app() -> gr.Blocks:
             plot_component = gr.Plot(label="Price Action & Uncertainty Cones")
 
         with gr.Row():
+            csv_download = gr.File(
+                label="📥 Download 48-Hour Forecast Table (CSV)",
+                interactive=False,
+                visible=True,
+            )
+
+        with gr.Row():
             forecast_table = gr.Dataframe(
                 headers=[
-                    "Horizon",
-                    "Step (hrs)",
-                    "Predicted Price",
+                    "Step",
+                    "Timestamp (UTC)",
+                    "Price / Prediction",
                     "Return %",
                     "Direction",
-                    "P10 Bound",
-                    "P90 Bound",
+                    "Prediction Interval [P10, P90]",
                 ],
-                label="Multi-Horizon Forecast Breakdown Table",
+                label="48-Hour Continuous Forecast Breakdown Table",
             )
 
         with gr.Row():
@@ -159,7 +180,7 @@ def build_reference_gradio_app() -> gr.Blocks:
         forecast_btn.click(
             fn=run_forecast_pipeline,
             inputs=[coin_selector, model_selector, sentiment_toggle],
-            outputs=[plot_component, forecast_table, scoreboard],
+            outputs=[plot_component, forecast_table, scoreboard, csv_download],
         )
 
     # Concurrency limit = 1 to protect GPU VRAM on Google Colab T4

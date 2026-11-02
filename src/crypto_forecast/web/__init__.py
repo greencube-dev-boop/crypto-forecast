@@ -6,6 +6,7 @@ from crypto_forecast.web.components import (
     build_forecast_table_rows,
     build_scoreboard_markdown,
 )
+from crypto_forecast.web.export import export_forecast_to_csv, mount_google_drive
 
 __all__ = [
     "create_app",
@@ -13,4 +14,6 @@ __all__ = [
     "create_forecast_cone_chart",
     "build_forecast_table_rows",
     "build_scoreboard_markdown",
+    "export_forecast_to_csv",
+    "mount_google_drive",
 ]

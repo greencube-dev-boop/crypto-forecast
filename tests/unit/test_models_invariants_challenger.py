@@ -299,24 +299,25 @@ class TestMonotonicConeExpansionInvariant:
         forecaster_instance: BaseForecaster,
         btc_realistic_prices: np.ndarray,
     ) -> None:
-        """Formally verifies spread 1h < spread 24h < spread 30d across all forecasters."""
+        """Formally verifies spread 1h < spread 24h < spread 48h across all forecasters."""
         preds = forecaster_instance.forecast(btc_realistic_prices, DEFAULT_HORIZONS)
 
         spread_1h = preds["1h"].uncertainty_spread()
         spread_24h = preds["24h"].uncertainty_spread()
-        spread_30d = preds["30d"].uncertainty_spread()
+        last_h = DEFAULT_HORIZONS[-1]
+        spread_last = preds[last_h].uncertainty_spread()
 
         assert spread_1h > 0.0, f"{forecaster_instance.name}: spread_1h is non-positive"
         assert spread_24h > 0.0, f"{forecaster_instance.name}: spread_24h is non-positive"
-        assert spread_30d > 0.0, f"{forecaster_instance.name}: spread_30d is non-positive"
+        assert spread_last > 0.0, f"{forecaster_instance.name}: spread_{last_h} is non-positive"
 
         assert spread_1h < spread_24h, (
             f"{forecaster_instance.name}: Cone expansion failed: spread_1h ({spread_1h}) "
             f"not strictly less than spread_24h ({spread_24h})"
         )
-        assert spread_24h < spread_30d, (
+        assert spread_24h < spread_last, (
             f"{forecaster_instance.name}: Cone expansion failed: spread_24h ({spread_24h}) "
-            f"not strictly less than spread_30d ({spread_30d})"
+            f"not strictly less than spread_{last_h} ({spread_last})"
         )
 
     def test_trajectory_cone_expansion_endpoints(
@@ -344,7 +345,7 @@ class TestMonotonicConeExpansionInvariant:
         forecaster_instance: BaseForecaster,
         btc_realistic_prices: np.ndarray,
     ) -> None:
-        """Verifies spread 1h < spread 24h < spread 30d holds under extreme sentiment drifts."""
+        """Verifies spread 1h < spread 24h < spread 48h holds under extreme sentiment drifts."""
         for pol in [-1.0, 1.0]:
             preds = forecaster_instance.forecast(
                 btc_realistic_prices,
@@ -353,11 +354,12 @@ class TestMonotonicConeExpansionInvariant:
             )
             sp_1h = preds["1h"].uncertainty_spread()
             sp_24h = preds["24h"].uncertainty_spread()
-            sp_30d = preds["30d"].uncertainty_spread()
+            last_h = DEFAULT_HORIZONS[-1]
+            sp_last = preds[last_h].uncertainty_spread()
 
-            assert sp_1h < sp_24h < sp_30d, (
+            assert sp_1h < sp_24h < sp_last, (
                 f"{forecaster_instance.name}: Drift (polarity={pol}) broke cone expansion: "
-                f"1h={sp_1h:.4f}, 24h={sp_24h:.4f}, 30d={sp_30d:.4f}"
+                f"1h={sp_1h:.4f}, 24h={sp_24h:.4f}, {last_h}={sp_last:.4f}"
             )
 
 
@@ -595,7 +597,7 @@ class TestAdversarialStressAndFailureModes:
         preds = forecaster_instance.forecast(short_context, DEFAULT_HORIZONS)
         points, quantiles = forecaster_instance.forecast_trajectory(short_context, max_horizon_hours=720)
 
-        assert len(preds) == 11
+        assert len(preds) == len(DEFAULT_HORIZONS)
         assert points.shape == (720,)
         assert quantiles.shape == (720, 3)
         assert np.all(quantiles[:, 0] <= quantiles[:, 1])

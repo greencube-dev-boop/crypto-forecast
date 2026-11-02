@@ -13,8 +13,9 @@ from typing import Final
 # 1. Multi-Horizon Forecasting Horizons
 # ==============================================================================
 
-# Exact 11 horizons specified in Requirement R1 & ORIGINAL_REQUEST.md
-DEFAULT_HORIZONS: Final[list[str]] = [
+# 48 Continuous Hourly Horizons specified in Requirement R3 & ORIGINAL_REQUEST.md
+HOURLY_48_HORIZONS: Final[list[str]] = [f"{i}h" for i in range(1, 49)]
+DISCRETE_11_HORIZONS: Final[list[str]] = [
     "1h",
     "2h",
     "4h",
@@ -28,14 +29,12 @@ DEFAULT_HORIZONS: Final[list[str]] = [
     "30d",
 ]
 
-# Discrete mapping from horizon identifier to equivalent integer hours
+DEFAULT_HORIZONS: Final[list[str]] = HOURLY_48_HORIZONS
+
+# Discrete mapping from horizon identifier to equivalent integer hours (1h..48h and legacy multi-day)
 HORIZON_TO_HOURS: Final[dict[str, int]] = {
-    "1h": 1,
-    "2h": 2,
-    "4h": 4,
-    "6h": 6,
-    "12h": 12,
-    "24h": 24,
+    **{f"{i}h": i for i in range(1, 49)},
+    "1d": 24,
     "2d": 48,
     "3d": 72,
     "7d": 168,
@@ -43,17 +42,20 @@ HORIZON_TO_HOURS: Final[dict[str, int]] = {
     "30d": 720,
 }
 
+
+def get_horizon_hours(horizon: str) -> int:
+  """Converts a horizon string ('1h'..'48h', '1d'..'30d') into integer hours."""
+  if horizon in HORIZON_TO_HOURS:
+    return HORIZON_TO_HOURS[horizon]
+  clean = horizon.strip().lower()
+  if clean.endswith("h") and clean[:-1].isdigit():
+    return int(clean[:-1])
+  raise ValueError(f"Unknown horizon identifier: '{horizon}'")
+
+
 # Dual-resolution routing:
 # Intraday pipeline (1-hour candles): horizons up to 48 hours (48 steps <= 64 Chronos-Bolt cap)
-INTRADAY_HORIZONS: Final[list[str]] = [
-    "1h",
-    "2h",
-    "4h",
-    "6h",
-    "12h",
-    "24h",
-    "2d",
-]
+INTRADAY_HORIZONS: Final[list[str]] = HOURLY_48_HORIZONS + ["1d", "2d"]
 
 # Macro pipeline (1-day candles): horizons from 1 day to 30 days (1 to 30 steps <= 64 Chronos-Bolt cap)
 MACRO_HORIZONS: Final[list[str]] = [
@@ -66,7 +68,7 @@ MACRO_HORIZONS: Final[list[str]] = [
 ]
 
 # Discrete step mappings per resolution
-INTRADAY_STEPS: Final[list[int]] = [1, 2, 4, 6, 12, 24, 48]
+INTRADAY_STEPS: Final[list[int]] = list(range(1, 49))
 MACRO_STEPS: Final[list[int]] = [1, 2, 3, 7, 14, 30]
 
 # ==============================================================================

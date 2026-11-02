@@ -101,6 +101,13 @@ def run_asset_compatibility_analysis(
     primary_model = models[0] if models else PersistenceForecaster()
     is_pure_persistence = isinstance(primary_model, PersistenceForecaster)
 
+    # Ensure sufficient series length for requested horizons (100-bar context + max horizon + buffer)
+    max_step = max(
+        (HORIZON_TO_HOURS.get(h, int(h[:-1]) if h.endswith("h") and h[:-1].isdigit() else 1) for h in target_horizons),
+        default=720,
+    )
+    needed_bars = max(500, max_step + 150)
+
     records: list[dict[str, Any]] = []
 
     for sym in target_symbols:
@@ -108,13 +115,13 @@ def run_asset_compatibility_analysis(
         if df_map and sym in df_map:
             prices = df_map[sym]["close"].values
         else:
-            prices = _generate_synthetic_prices(sym, n_bars=400)
+            prices = _generate_synthetic_prices(sym, n_bars=needed_bars)
 
         clean_sym = sym.split("/")[0].upper()
 
         for h in target_horizons:
-            step = HORIZON_TO_HOURS.get(h, 1)
-            if len(prices) > step + 50:
+            step = HORIZON_TO_HOURS.get(h, int(h[:-1]) if h.endswith("h") and h[:-1].isdigit() else 1)
+            if len(prices) > step + 100:
                 y_true = prices[step:]
                 y_persist = prices[:-step]
                 y_true_ret = (y_true - y_persist) / y_persist
@@ -146,13 +153,20 @@ def run_asset_compatibility_analysis(
                     y_persist_sub = prices[100 : len(prices) - step : stride][: len(y_model)]
                     y_true_ret_sub = (y_true_sub - y_persist_sub) / y_persist_sub
 
-                    mae_m = calculate_mae(y_true_sub, y_model)
-                    rmse_m = calculate_rmse(y_true_sub, y_model)
-                    mae_p = calculate_mae(y_true_sub, y_persist_sub)
-                    rmse_p = calculate_rmse(y_true_sub, y_persist_sub)
-                    hit_rate = calculate_hit_rate(y_true_ret_sub, ret_model)
-                    skill_mae = calculate_skill_score(mae_m, mae_p)
-                    skill_rmse = calculate_skill_score(rmse_m, rmse_p)
+                    if len(y_model) == 0 or len(y_true_sub) == 0 or len(y_persist_sub) == 0:
+                        mae_m = mae_p
+                        rmse_m = rmse_p
+                        hit_rate = 50.0
+                        skill_mae = 0.0
+                        skill_rmse = 0.0
+                    else:
+                        mae_m = calculate_mae(y_true_sub, y_model)
+                        rmse_m = calculate_rmse(y_true_sub, y_model)
+                        mae_p = calculate_mae(y_true_sub, y_persist_sub)
+                        rmse_p = calculate_rmse(y_true_sub, y_persist_sub)
+                        hit_rate = calculate_hit_rate(y_true_ret_sub, ret_model)
+                        skill_mae = calculate_skill_score(mae_m, mae_p)
+                        skill_rmse = calculate_skill_score(rmse_m, rmse_p)
             else:
                 mae_m = mae_p = 10.0
                 rmse_m = rmse_p = 12.0

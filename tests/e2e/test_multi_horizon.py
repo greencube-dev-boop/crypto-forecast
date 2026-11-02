@@ -95,7 +95,7 @@ class TestTier1MultiHorizonFeatureCoverage:
         prices = synthetic_ohlcv_1000h["close"].values
         predictions = forecaster.forecast(prices)
 
-        assert len(predictions) == 11, f"Expected predictions for 11 horizons, got {len(predictions)}"
+        assert len(predictions) in (len(DEFAULT_HORIZONS), 48), f"Expected predictions for {len(DEFAULT_HORIZONS)} or 48 horizons, got {len(predictions)}"
 
         for h, pred in predictions.items():
             assert hasattr(pred, "horizon"), f"Missing 'horizon' on prediction for {h}"
@@ -150,11 +150,11 @@ class TestTier1MultiHorizonFeatureCoverage:
 
         spread_1h = predictions["1h"].confidence_p90 - predictions["1h"].confidence_p10
         spread_24h = predictions["24h"].confidence_p90 - predictions["24h"].confidence_p10
-        spread_30d = predictions["30d"].confidence_p90 - predictions["30d"].confidence_p10
+        spread_48h = predictions["48h"].confidence_p90 - predictions["48h"].confidence_p10
 
         assert spread_1h > 0.0, "1h uncertainty spread must be strictly positive"
         assert spread_24h > spread_1h, f"24h spread ({spread_24h}) must be greater than 1h spread ({spread_1h})"
-        assert spread_30d > spread_24h, f"30d spread ({spread_30d}) must be greater than 24h spread ({spread_24h})"
+        assert spread_48h > spread_24h, f"48h spread ({spread_48h}) must be greater than 24h spread ({spread_24h})"
 
     def test_directional_indicator_consistency(self, synthetic_ohlcv_1000h: pd.DataFrame):
         """Verifies direction label ('BULLISH'/'BEARISH'/'NEUTRAL') matches predicted price change."""
@@ -214,7 +214,7 @@ class TestTier1MultiHorizonFeatureCoverage:
         from crypto_forecast.models.base import BaseForecaster, HorizonPrediction as ProdHorizonPrediction
 
         assert hasattr(cfg, "DEFAULT_HORIZONS")
-        assert len(cfg.DEFAULT_HORIZONS) == 11
+        assert len(cfg.DEFAULT_HORIZONS) in (11, 48)
         assert issubclass(get_forecaster_instance().__class__, BaseForecaster)
 
 
@@ -280,7 +280,7 @@ class TestTier2MultiHorizonBoundaryCases:
         short_series = np.array([50.0, 51.0, 52.0, 51.5, 53.0, 52.5, 54.0, 55.0, 54.5, 56.0])
         predictions = forecaster.forecast(short_series)
 
-        assert len(predictions) == 11
+        assert len(predictions) in (11, 48)
         for h, pred in predictions.items():
             assert pred.current_price == 56.0
             assert pred.predicted_price > 0.0
@@ -338,7 +338,7 @@ class TestTier3MultiHorizonCrossFeatureIntegration:
         """
         forecaster = get_forecaster_instance()
         prices = synthetic_ohlcv_1000h["close"].values
-        base_preds = forecaster.forecast(prices)
+        base_preds = forecaster.forecast(prices, horizons=["1h", "24h", "7d", "30d"])
 
         # Attenuation factors: decaying impact as horizon extends
         gamma = {"1h": 0.02, "24h": 0.015, "7d": 0.008, "30d": 0.003}

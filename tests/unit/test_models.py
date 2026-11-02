@@ -24,6 +24,7 @@ if str(SRC_DIR) not in sys.path:
 
 import numpy as np
 import pytest
+from unittest.mock import MagicMock, patch
 
 from crypto_forecast.config import (
     DEFAULT_HORIZONS,
@@ -354,7 +355,7 @@ class TestPersistenceForecaster:
     def test_persistence_all_11_horizons(self, synthetic_prices_500):
         forecaster = PersistenceForecaster()
         preds = forecaster.forecast(synthetic_prices_500)
-        assert len(preds) == 11
+        assert len(preds) == len(DEFAULT_HORIZONS)
         assert list(preds.keys()) == DEFAULT_HORIZONS
 
     def test_persistence_uncertainty_cone_widening(self, synthetic_prices_500):
@@ -363,11 +364,11 @@ class TestPersistenceForecaster:
 
         spread_1h = preds["1h"].confidence_p90 - preds["1h"].confidence_p10
         spread_24h = preds["24h"].confidence_p90 - preds["24h"].confidence_p10
-        spread_30d = preds["30d"].confidence_p90 - preds["30d"].confidence_p10
+        spread_48h = preds["48h"].confidence_p90 - preds["48h"].confidence_p10
 
         assert spread_1h > 0.0
         assert spread_24h > spread_1h
-        assert spread_30d > spread_24h
+        assert spread_48h > spread_24h
 
     def test_persistence_quantile_monotonicity(self, synthetic_prices_500):
         forecaster = PersistenceForecaster()
@@ -390,7 +391,7 @@ class TestPersistenceForecaster:
     def test_persistence_single_price_volatility_fallback(self):
         forecaster = PersistenceForecaster()
         preds = forecaster.forecast([100.0])
-        assert len(preds) == 11
+        assert len(preds) == len(DEFAULT_HORIZONS)
         assert preds["1h"].confidence_p10 < 100.0 < preds["1h"].confidence_p90
 
     def test_persistence_sentiment_drift_integration(self, synthetic_prices_500):
@@ -399,7 +400,7 @@ class TestPersistenceForecaster:
         bull = forecaster.forecast(synthetic_prices_500, sentiment_polarity=0.7)
         bear = forecaster.forecast(synthetic_prices_500, sentiment_polarity=-0.7)
 
-        for h in ["1h", "24h", "7d", "30d"]:
+        for h in ["1h", "12h", "24h", "48h"]:
             assert bull[h].predicted_price > base[h].predicted_price
             assert bear[h].predicted_price < base[h].predicted_price
             assert bull[h].sentiment_adjusted is True
@@ -428,7 +429,7 @@ class TestTimesFMForecaster:
         forecaster = TimesFMForecaster(force_fallback=True)
         preds = forecaster.forecast(synthetic_prices_500)
 
-        assert len(preds) == 11
+        assert len(preds) == len(DEFAULT_HORIZONS)
         for h in DEFAULT_HORIZONS:
             assert h in preds
             p = preds[h]
@@ -461,11 +462,11 @@ class TestTimesFMForecaster:
 
         spread_1h = preds["1h"].uncertainty_spread()
         spread_24h = preds["24h"].uncertainty_spread()
-        spread_30d = preds["30d"].uncertainty_spread()
+        spread_48h = preds["48h"].uncertainty_spread()
 
         assert spread_1h > 0.0
         assert spread_24h > spread_1h
-        assert spread_30d > spread_24h
+        assert spread_48h > spread_24h
 
     def test_timesfm_flat_price_neutral(self, flat_prices_100):
         forecaster = TimesFMForecaster(force_fallback=True)
@@ -480,7 +481,7 @@ class TestTimesFMForecaster:
         forecaster = TimesFMForecaster(force_fallback=True)
         short = np.array([50.0, 51.0, 52.0, 53.0])
         preds = forecaster.forecast(short)
-        assert len(preds) == 11
+        assert len(preds) == len(DEFAULT_HORIZONS)
         for pred in preds.values():
             assert pred.predicted_price > 0.0
             assert pred.current_price == 53.0
@@ -491,7 +492,7 @@ class TestTimesFMForecaster:
         bull = forecaster.forecast(synthetic_prices_500, sentiment_polarity=0.8)
         bear = forecaster.forecast(synthetic_prices_500, sentiment_polarity=-0.8)
 
-        for h in ["1h", "24h", "7d", "30d"]:
+        for h in ["1h", "12h", "24h", "48h"]:
             assert bull[h].predicted_price > base[h].predicted_price
             assert bear[h].predicted_price < base[h].predicted_price
             assert bull[h].confidence_p10 <= bull[h].confidence_p50 <= bull[h].confidence_p90
@@ -502,6 +503,41 @@ class TestTimesFMForecaster:
         assert raw_q.shape == (720, 10)
         assert np.all(raw_q[:, 1] <= raw_q[:, 5])
         assert np.all(raw_q[:, 5] <= raw_q[:, 9])
+
+    def test_timesfm_load_device_delegation(self):
+        """Verifies TimesFM 2.5 PyTorch object loading without top-level .to() attribute."""
+        mock_timesfm = MagicMock()
+        mock_torch = MagicMock()
+
+        # Mock inner torch module
+        inner_module = MagicMock()
+        inner_module.device = "cpu"
+        inner_module.to = MagicMock(return_value=inner_module)
+
+        # Mock top-level TimesFM_2p5_200M_torch without .to()
+        class MockTimesFM2p5:
+            def __init__(self):
+                self.model = inner_module
+            def compile(self, config):
+                pass
+
+        mock_instance = MockTimesFM2p5()
+        mock_timesfm.TimesFM_2p5_200M_torch.from_pretrained = MagicMock(return_value=mock_instance)
+        mock_torch.cuda.is_available.return_value = True
+        device_obj = MagicMock()
+        device_obj.type = "cuda"
+        mock_torch.device.return_value = device_obj
+
+        with patch.dict(sys.modules, {"timesfm": mock_timesfm, "torch": mock_torch}):
+            forecaster = TimesFMForecaster(device="cuda", fallback_to_heuristic=False)
+            forecaster.load()
+
+            assert forecaster.is_loaded
+            assert not forecaster.is_fallback_active
+            inner_module.to.assert_called_once_with(device_obj)
+            assert inner_module.device == device_obj
+            mock_torch.set_float32_matmul_precision.assert_called_once_with("high")
+
 
 
 # ==============================================================================
@@ -522,7 +558,7 @@ class TestChronosForecaster:
         forecaster = ChronosForecaster(use_fallback=True)
         preds = forecaster.forecast(synthetic_prices_500)
 
-        assert len(preds) == 11
+        assert len(preds) == len(DEFAULT_HORIZONS)
         for h in DEFAULT_HORIZONS:
             assert h in preds
             p = preds[h]
@@ -553,7 +589,7 @@ class TestChronosForecaster:
         bull = forecaster.forecast(synthetic_prices_500, sentiment_polarity=0.75)
         bear = forecaster.forecast(synthetic_prices_500, sentiment_polarity=-0.75)
 
-        for h in ["1h", "24h", "7d", "30d"]:
+        for h in ["1h", "12h", "24h", "48h"]:
             assert bull[h].predicted_price > base[h].predicted_price
             assert bear[h].predicted_price < base[h].predicted_price
             assert bull[h].confidence_p10 <= bull[h].confidence_p50 <= bull[h].confidence_p90
@@ -586,7 +622,7 @@ class TestGraniteTTMForecaster:
         forecaster = GraniteTTMForecaster(use_fallback=True)
         preds = forecaster.forecast(synthetic_prices_500)
 
-        assert len(preds) == 11
+        assert len(preds) == len(DEFAULT_HORIZONS)
         for h in DEFAULT_HORIZONS:
             assert h in preds
             p = preds[h]
@@ -617,7 +653,7 @@ class TestGraniteTTMForecaster:
         bull = forecaster.forecast(synthetic_prices_500, sentiment_polarity=0.7)
         bear = forecaster.forecast(synthetic_prices_500, sentiment_polarity=-0.7)
 
-        for h in ["1h", "24h", "7d", "30d"]:
+        for h in ["1h", "12h", "24h", "48h"]:
             assert bull[h].predicted_price > base[h].predicted_price
             assert bear[h].predicted_price < base[h].predicted_price
             assert bull[h].confidence_p10 <= bull[h].confidence_p50 <= bull[h].confidence_p90
@@ -652,7 +688,7 @@ class TestModelPolymorphismAndBenchmarking:
         ]
         for m in models:
             preds = m.forecast(synthetic_prices_500)
-            assert len(preds) == 11
+            assert len(preds) == len(DEFAULT_HORIZONS)
             assert set(preds.keys()) == set(DEFAULT_HORIZONS)
 
     def test_price_scale_invariance_subpenny_to_sixfigures(self):

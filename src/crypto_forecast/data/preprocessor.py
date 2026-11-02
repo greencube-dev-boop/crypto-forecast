@@ -22,12 +22,7 @@ logger = logging.getLogger(__name__)
 
 # Step mappings based on series frequency
 HOURLY_HORIZON_STEPS: dict[str, int] = {
-    "1h": 1,
-    "2h": 2,
-    "4h": 4,
-    "6h": 6,
-    "12h": 12,
-    "24h": 24,
+    **{f"{i}h": i for i in range(1, 49)},
     "1d": 24,
     "2d": 48,
     "3d": 72,

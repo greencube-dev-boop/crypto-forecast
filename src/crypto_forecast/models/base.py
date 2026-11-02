@@ -19,6 +19,7 @@ import numpy as np
 from crypto_forecast.config import (
     DEFAULT_HORIZONS,
     HORIZON_TO_HOURS,
+    get_horizon_hours,
 )
 
 DIRECTION_THRESHOLD: Final[float] = 1e-6
@@ -235,9 +236,10 @@ class BaseForecaster(ABC):
         predictions: dict[str, HorizonPrediction] = {}
 
         for h in horizons:
-            if h not in HORIZON_TO_HOURS:
+            try:
+                step_hours = get_horizon_hours(h)
+            except ValueError:
                 raise ValueError(f"Unknown horizon identifier: '{h}'. Must be in HORIZON_TO_HOURS.")
-            step_hours = HORIZON_TO_HOURS[h]
             idx = step_hours - 1
 
             if idx >= n_steps:

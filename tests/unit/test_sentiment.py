@@ -694,7 +694,8 @@ class TestHorizonGammaAndDrift:
                 f"Gamma did not monotonically decay: {DEFAULT_HORIZONS[i]} ({gammas[i]}) <= {DEFAULT_HORIZONS[i+1]} ({gammas[i+1]})"
             )
         assert gammas[0] == pytest.approx(0.02, abs=2e-3)
-        assert gammas[-1] == pytest.approx(0.002, abs=1e-3)
+        assert gammas[-1] < gammas[0]
+        assert compute_horizon_gamma("30d") == pytest.approx(0.002, abs=1e-3)
 
     def test_apply_sentiment_drift_bullish_and_bearish(self):
         """Verifies directional shift on predictions dictionary."""

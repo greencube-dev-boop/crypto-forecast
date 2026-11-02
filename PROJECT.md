@@ -6,13 +6,14 @@ Modular Python package (`crypto_forecast`) operating under a dual-resolution sam
 ```
                            +---------------------------------------+
                            |     Free Public Market Data APIs      |
-                           |  Binance REST /api/v3 | Yahoo Finance |
+                           |  Binance Global -> Binance US (451)   |
+                           |       -> Yahoo Finance Fallback       |
                            +-------------------+-------------------+
                                                |
                                                v
 +------------------------+         +-------------------------------+
-| Keyless Crypto RSS     |         |  Dual-Resolution Resampling   |
-| CoinTelegraph/CoinDesk |         |  1h (intraday) & 1d (macro)   |
+| Keyless Crypto RSS     |         |  Continuous 48h Resampling    |
+| CoinTelegraph/CoinDesk |         |  1h (1h..48h) & 1d (1d..30d)  |
 +-----------+------------+         +---------------+---------------+
             |                                      |
             v                                      v
@@ -26,9 +27,9 @@ Modular Python package (`crypto_forecast`) operating under a dual-resolution sam
                                 v
                    +---------------------------+
                    | BaseForecaster Interface  |
-                   | 11 Discrete Horizons:     |
-                   | 1h, 2h, 4h, 6h, 12h, 24h, |
-                   | 2d, 3d, 7d, 14d, 30d      |
+                   | 48 Continuous Horizons:   |
+                   | 1h .. 48h (plus legacy    |
+                   | 2d, 3d, 7d, 14d, 30d)     |
                    +-------------+-------------+
                                  |
          +-----------------------+-----------------------+
@@ -37,7 +38,7 @@ Modular Python package (`crypto_forecast`) operating under a dual-resolution sam
 +------------------+    +------------------+    +------------------+
 | google/timesfm-  |    | amazon/chronos-2 |    | Baseline         |
 | 2.5-200m-pytorch |    | & chronos-bolt   |    | Persistence      |
-| (Primary Model)  |    | (Co-Candidates)  |    | (Benchmark)      |
+| (model.model.to) |    | (Co-Candidates)  |    | (Benchmark)      |
 +--------+---------+    +--------+---------+    +--------+---------+
          |                       |                       |
          +-----------------------+-----------------------+
@@ -55,7 +56,7 @@ Modular Python package (`crypto_forecast`) operating under a dual-resolution sam
 +----------------------------------+   +----------------------------------+
 | Interactive Colab Web GUI        |   | Google Colab Runner Notebook     |
 | Gradio Blocks + Plotly Cones     |   | colab_runner.ipynb               |
-| Zero-config share=True Tunnel    |   | Remote GitHub Pull & Colab CLI   |
+| 49-Row Table & CSV Drive Export  |   | Remote GitHub Pull & Colab CLI   |
 +----------------------------------+   +----------------------------------+
 ```
 
@@ -160,16 +161,19 @@ d:\code\trade\
 ├── src/
 │   └── crypto_forecast/
 │       ├── __init__.py
-│       ├── config.py              # Constants, 11 horizons, model names, default pairs
+│       ├── config.py              # Constants, 48 horizons, model names, default pairs
+│       ├── constants.py           # Re-exported constants module
+│       ├── ui/
+│       │   └── __init__.py        # Re-exporting web interface alias
 │       ├── data/
 │       │   ├── __init__.py
-│       │   ├── ingestion.py       # Binance REST & Yahoo Finance fetchers
+│       │   ├── ingestion.py       # Binance REST (Global/US) & Yahoo Finance fetchers
 │       │   ├── preprocessor.py    # Dual-resolution resampling & gap imputation
 │       │   └── indicators.py      # RSI, MACD, Bollinger Bands, ATR, OBV
 │       ├── models/
 │       │   ├── __init__.py
 │       │   ├── base.py            # BaseForecaster ABC and HorizonPrediction dataclass
-│       │   ├── timesfm_model.py   # google/timesfm-2.5-200m-pytorch wrapper
+│       │   ├── timesfm_model.py   # google/timesfm-2.5-200m-pytorch wrapper (model.model.to)
 │       │   ├── chronos_model.py   # amazon/chronos-2 & chronos-bolt-small wrappers
 │       │   ├── granite_model.py   # ibm-granite/granite-timeseries-ttm-r2 wrapper
 │       │   ├── baseline.py        # Persistence & naive drift baseline
@@ -181,9 +185,10 @@ d:\code\trade\
 │       │   └── compatibility.py   # Asset-to-model compatibility evaluator
 │       └── web/
 │           ├── __init__.py
-│           ├── app.py             # Gradio Blocks UI entry point
-│           ├── components.py      # UI control components & tables
-│           └── charts.py          # Plotly candlestick & shaded forecast cone charts
+│           ├── app.py             # Gradio Blocks UI entry point with CSV download
+│           ├── components.py      # UI control components & 49-row tables
+│           ├── charts.py          # Plotly candlestick & shaded forecast cone charts
+│           └── export.py          # CSV generation and Google Drive mount/export
 ├── scripts/
 │   ├── run_benchmark.py           # Headless benchmark CLI runner
 │   ├── run_forecast.py            # Headless forecasting CLI runner

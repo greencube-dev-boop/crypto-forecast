@@ -16,6 +16,8 @@ build/
 
 # Local benchmark artifacts
 benchmark_results.json
+exports/
 
 # Environment variables
 .env
+

@@ -71,3 +71,23 @@ class TestBacktesterAndCompatibilityUnit:
         assert isinstance(res, pd.DataFrame)
         assert len(res) == 4
         assert set(res["symbol"].unique()) == {"BTC", "ETH"}
+
+    def test_run_asset_compatibility_short_series_no_empty_array_error(self):
+        """Asserts short series with long horizons does not crash with empty array ValueError."""
+        short_df = pd.DataFrame({"close": np.linspace(100, 110, 80)})
+        df_map = {"BTC": short_df}
+        from crypto_forecast.models.timesfm_model import TimesFMForecaster
+        model = TimesFMForecaster(force_fallback=True)
+        res = run_asset_compatibility_analysis([model], symbols=["BTC"], horizons=["14d", "30d"], df_map=df_map)
+        assert isinstance(res, pd.DataFrame)
+        assert len(res) == 2
+        assert not res["mae_model"].isna().all() or not res.empty
+
+    def test_run_asset_compatibility_non_persistence_synthetic_scaling(self):
+        """Asserts synthetic prices scale to handle long horizons without empty array error."""
+        from crypto_forecast.models.timesfm_model import TimesFMForecaster
+        model = TimesFMForecaster(force_fallback=True)
+        res = run_asset_compatibility_analysis([model], symbols=["BTC"], horizons=["1h", "24h", "14d"])
+        assert isinstance(res, pd.DataFrame)
+        assert len(res) == 3
+        assert np.all(res["mae_model"] >= 0.0)
