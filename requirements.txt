@@ -1,0 +1,22 @@
+# Core Numerical & Time Series
+numpy>=1.24.0
+pandas>=2.0.0
+torch>=2.1.0
+
+# Foundation Models & NLP
+transformers>=4.40.0
+accelerate>=0.28.0
+timesfm
+chronos-forecasting
+
+# Market Data Ingestion & Technical Analysis
+requests>=2.31.0
+yfinance>=0.2.36
+feedparser>=6.0.10
+
+# Web GUI & Visualization
+gradio>=4.20.0
+plotly>=5.18.0
+
+# Testing & Quality
+pytest>=8.0.0

@@ -1,0 +1,21 @@
+# Byte-compiled / optimized / DLL files
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Caches and internal agent directories
+.agents/
+.pytest_cache/
+.ruff_cache/
+*.log
+
+# Distribution / packaging
+dist/
+build/
+*.egg-info/
+
+# Local benchmark artifacts
+benchmark_results.json
+
+# Environment variables
+.env
