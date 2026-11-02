@@ -333,8 +333,11 @@ class TimesFMForecaster(BaseForecaster):
         current_price = float(prices[-1])
         lower_bound = max(1e-12, min(0.0001, current_price * 0.01))
 
-        max_step = max(HORIZON_TO_HOURS.get(h, 1) for h in horizons) if horizons else 720
-        max_step = min(self.max_horizon, max(max_step, 720))
+        max_step = max(
+            (HORIZON_TO_HOURS.get(h, int(h[:-1]) if h.endswith("h") and h[:-1].isdigit() else 1) for h in horizons),
+            default=48,
+        ) if horizons else 48
+        max_step = min(self.max_horizon, max(1, max_step))
 
         point_pred, quantile_pred = self._run_forward_pass(prices, horizon=max_step)
 

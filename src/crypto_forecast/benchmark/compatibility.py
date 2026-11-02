@@ -119,6 +119,28 @@ def run_asset_compatibility_analysis(
 
         clean_sym = sym.split("/")[0].upper()
 
+        # For non-persistence, run forward passes once across all horizons for representative slices
+        preds_by_slice: list[tuple[int, float, dict[str, Any]]] = []
+        if not is_pure_persistence:
+            max_horizon_step = max(
+                (HORIZON_TO_HOURS.get(h, int(h[:-1]) if h.endswith("h") and h[:-1].isdigit() else 1) for h in target_horizons),
+                default=48,
+            )
+            if len(prices) > max_horizon_step + 100:
+                stride = max(1, (len(prices) - max_horizon_step - 100) // 5)
+                slice_indices = list(range(100, len(prices) - max_horizon_step, stride))[:5]
+            else:
+                slice_indices = []
+
+            for idx in slice_indices:
+                ctx = prices[idx - 100 : idx]
+                curr_p = float(ctx[-1])
+                try:
+                    preds_dict = primary_model.forecast(ctx, horizons=target_horizons)
+                    preds_by_slice.append((idx, curr_p, preds_dict))
+                except Exception as exc:
+                    logger.warning("Slice forecast failed at index %d for %s: %s", idx, sym, exc)
+
         for h in target_horizons:
             step = HORIZON_TO_HOURS.get(h, int(h[:-1]) if h.endswith("h") and h[:-1].isdigit() else 1)
             if len(prices) > step + 100:
@@ -138,35 +160,36 @@ def run_asset_compatibility_analysis(
                     coin_bias = (sum(ord(c) for c in clean_sym) % 9) - 4
                     hit_rate = max(45.0, min(65.0, 52.0 + coin_bias - 0.1 * step))
                 else:
-                    # Run actual forward evaluations for slice points
                     y_model = []
                     ret_model = []
-                    stride = max(1, (len(prices) - step - 100) // 10)
-                    for idx in range(100, len(prices) - step, stride):
-                        ctx = prices[idx - 100 : idx]
-                        curr_p = ctx[-1]
-                        pred = primary_model.forecast(ctx, horizons=[h])[h]
-                        y_model.append(pred.predicted_price)
-                        ret_model.append((pred.predicted_price - curr_p) / curr_p)
+                    y_true_sub = []
+                    y_persist_sub = []
 
-                    y_true_sub = prices[100 + step : len(prices) : stride][: len(y_model)]
-                    y_persist_sub = prices[100 : len(prices) - step : stride][: len(y_model)]
-                    y_true_ret_sub = (y_true_sub - y_persist_sub) / y_persist_sub
+                    for idx, curr_p, p_dict in preds_by_slice:
+                        if (idx + step) < len(prices) and h in p_dict:
+                            pred_price = p_dict[h].predicted_price
+                            actual_price = prices[idx + step]
 
-                    if len(y_model) == 0 or len(y_true_sub) == 0 or len(y_persist_sub) == 0:
+                            y_model.append(pred_price)
+                            ret_model.append((pred_price - curr_p) / curr_p)
+                            y_true_sub.append(actual_price)
+                            y_persist_sub.append(curr_p)
+
+                    if len(y_model) == 0 or len(y_true_sub) == 0:
                         mae_m = mae_p
                         rmse_m = rmse_p
                         hit_rate = 50.0
                         skill_mae = 0.0
                         skill_rmse = 0.0
                     else:
+                        y_true_ret_sub = (np.array(y_true_sub) - np.array(y_persist_sub)) / np.array(y_persist_sub)
                         mae_m = calculate_mae(y_true_sub, y_model)
                         rmse_m = calculate_rmse(y_true_sub, y_model)
-                        mae_p = calculate_mae(y_true_sub, y_persist_sub)
-                        rmse_p = calculate_rmse(y_true_sub, y_persist_sub)
+                        mae_p_sub = calculate_mae(y_true_sub, y_persist_sub)
+                        rmse_p_sub = calculate_rmse(y_true_sub, y_persist_sub)
                         hit_rate = calculate_hit_rate(y_true_ret_sub, ret_model)
-                        skill_mae = calculate_skill_score(mae_m, mae_p)
-                        skill_rmse = calculate_skill_score(rmse_m, rmse_p)
+                        skill_mae = calculate_skill_score(mae_m, mae_p_sub)
+                        skill_rmse = calculate_skill_score(rmse_m, rmse_p_sub)
             else:
                 mae_m = mae_p = 10.0
                 rmse_m = rmse_p = 12.0

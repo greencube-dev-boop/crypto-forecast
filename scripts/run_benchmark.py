@@ -74,12 +74,20 @@ def main() -> int:
         help="Candidate model names",
     )
     parser.add_argument(
+        "--fast",
+        action="store_true",
+        help="Fast benchmark mode (evaluates top coins on key horizons in seconds)",
+    )
+    parser.add_argument(
         "--output",
         type=str,
         default="benchmark_results.json",
         help="Output JSON file path",
     )
     args = parser.parse_args()
+
+    eval_symbols = ["BTC", "ETH", "SOL"] if args.fast else args.symbols
+    eval_horizons = ["1h", "6h", "12h", "24h", "48h"] if args.fast else args.horizons
 
     logger.info("Initializing candidate models...")
     models = build_models(args.models)
@@ -88,8 +96,8 @@ def main() -> int:
     summary_records = []
 
     for model in models:
-        logger.info(f"Evaluating model: {model.model_id} on {len(args.symbols)} symbols...")
-        df_compat = run_asset_compatibility_analysis([model], symbols=args.symbols, horizons=args.horizons)
+        logger.info(f"Evaluating model: {model.model_id} on {len(eval_symbols)} symbols ({len(eval_horizons)} horizons)...")
+        df_compat = run_asset_compatibility_analysis([model], symbols=eval_symbols, horizons=eval_horizons)
         all_results[model.model_id] = df_compat.to_dict(orient="records")
 
         # Compute summary
@@ -97,6 +105,10 @@ def main() -> int:
         mean_mae = float(df_compat["mae_model"].mean())
         mean_rmse = float(df_compat["rmse_model"].mean())
         mean_skill = float(df_compat["skill_mae_pct"].mean())
+
+        logger.info(
+            f"  -> Model {model.model_id} complete | Hit-Rate: {mean_hit_rate:.1f}% | Skill: {mean_skill:+.1f}%"
+        )
 
         summary_records.append(
             {
