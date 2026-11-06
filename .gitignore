@@ -17,6 +17,8 @@ build/
 # Local benchmark artifacts
 benchmark_results.json
 exports/
+accuracy_eval/
+graphify-out/
 
 # Environment variables
 .env

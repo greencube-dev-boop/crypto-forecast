@@ -93,6 +93,18 @@ Modular Python package (`crypto_forecast`) operating under a dual-resolution sam
 | 28 | Colab CLI Execution Workflow | Documented headless execution patterns via `colab exec` and `colab run` | M6 | Survey 3 |
 | 29 | Opaque-Box E2E Test Suite (Tiers 1-4) | Comprehensive requirement-driven test suite covering all 11 horizons and components | M7 | Dual Track |
 | 30 | Adversarial Coverage Hardening (Tier 5) | White-box stress testing, failure mode probes, and edge-case boundary hardening | M7 | Dual Track |
+| 31 | Retrospective Lookback Math Engine | Given target $t$ and horizon $k \in [1, 48]$, slices historical context up to $t - k\text{h}$, generates predictions up to step $k$, discards intermediate steps $1 \dots k-1$, and records step $k$ for time $t$. Pairs ground truth settled close price at time $t$. | M8 | Survey 1 |
+| 32 | Causal Temporal Isolation & Zero-Lookahead | Slicing guarantee that context arrays never contain data after $t - k\text{h}$ for lookback $k$. | M8 | Survey 1 |
+| 33 | Multi-Model Retrospective Adapter | Unified execution adapter for `TimesFMForecaster`, `ChronosForecaster`, `GraniteTTMForecaster`, and `PersistenceForecaster`. | M8 | Survey 1 |
+| 34 | Trajectory Caching Optimization | Batched/cached trajectory generation across cutoff hours with diagonal step extraction to accelerate multi-hour backfills. | M8 | Survey 1, 2 |
+| 35 | CSV Schema Definition & Validation | 50-column canonical schema: `real time`, `value at time`, `value predicted 1h before`, ..., `48h before` with shorthand reader compatibility. | M8 | Survey 2 |
+| 36 | Multi-Pair File Naming Convention | Strict `{model}_{pair}.csv` naming convention (e.g. `timesfm_BTC_USDT.csv`), yielding `(pair count) * 4` CSV files. | M8 | Survey 2 |
+| 37 | Google Drive Persistence & Mounting | Colab Google Drive mount at `/content/drive/MyDrive/Trader/accuracy_eval/` with graceful local directory fallback. | M8 | Survey 2, 3 |
+| 38 | Incremental State Detection & Resume | Inspect existing CSV for `max(real time)`, detect newly completed hourly timestamps, skip already recorded timestamps. | M8 | Survey 2, 3 |
+| 39 | Idempotent Row Append & Atomic Write | Appends completed rows, deduplicates by `real time`, sorts monotonically, and writes atomically via temporary file. | M8 | Survey 2 |
+| 40 | Headless Colab Evaluation Notebook | `notebooks/accuracy_eval.ipynb` 8-cell linear execution flow without GUI (no Gradio/Streamlit). | M8 | Survey 3 |
+| 41 | Headless Verification CLI Script | `scripts/verify_accuracy_eval.py` standalone script validating math, schema, and incremental resume headlessly. | M8 | Survey 3 |
+| 42 | Automated Unit & Integration Tests | `tests/unit/test_accuracy_eval.py` & `tests/e2e/test_accuracy_eval_pipeline.py` verifying mathematical oracles (persistence oracle, step-aware mock), schema compliance, and incremental state preservation. | M8 | Survey 3 |
 
 ## Milestones
 | # | Name | Scope | Dependencies | Status |
@@ -104,6 +116,7 @@ Modular Python package (`crypto_forecast`) operating under a dual-resolution sam
 | M5 | Interactive Colab Web GUI & Plotly Cones | Gradio Blocks dashboard, Plotly candlestick + shaded forecast cones (`fill='tonexty'`), 11-horizon forecast breakdown table, model accuracy scoreboard, `share=True` tunnel, `demo.queue(1)` | M3, M4 | DONE |
 | M6 | Colab Runner Notebook & GitHub Packaging | `notebooks/colab_runner.ipynb` 1-click execution, Colab CLI headless runner, remote repo sync from `greencube-dev-boop`, `pyproject.toml`, `requirements.txt`, README | M1, M2, M3, M4, M5 | DONE |
 | M7 | Final Milestone: E2E Verification & Hardening | 100% pass of E2E Test Suite published in `TEST_READY.md` (Tiers 1-4), followed by Tier 5 adversarial coverage hardening | M6, TEST_READY.md | DONE |
+| M8 | Retrospective Accuracy Evaluation Pipeline | Implement `src/crypto_forecast/eval/` (`schemas.py`, `retrospective.py`, `dataset.py`, `pipeline.py`), `notebooks/accuracy_eval.ipynb`, `scripts/verify_accuracy_eval.py`, unit and e2e test suites | M1, M3, M4 | DONE |
 
 ## Interface Contracts
 
@@ -150,6 +163,24 @@ Modular Python package (`crypto_forecast`) operating under a dual-resolution sam
   - `run_asset_compatibility_analysis(models: list[BaseForecaster], symbols: list[str]) -> pd.DataFrame`
     - Returns cross-asset performance matrix for all tested coins.
 
+### M8 (Retrospective Accuracy Evaluation)
+- **Schemas (`crypto_forecast.eval.schemas`)**:
+  - `ACCURACY_EVAL_COLUMNS: Final[list[str]]` (50 columns: `real time`, `value at time`, `value predicted 1h before` .. `48h before`)
+  - `get_accuracy_csv_filename(model: Any, pair: str) -> str` (`{model}_{pair}.csv`)
+  - `canonicalize_columns(df: pd.DataFrame) -> pd.DataFrame`
+  - `validate_accuracy_df_schema(df: pd.DataFrame, strict: bool = True) -> tuple[bool, list[str]]`
+- **Retrospective Engine (`crypto_forecast.eval.retrospective`)**:
+  - `evaluate_retrospective_horizon(model, df_hourly, target_timestamp, k, context_window, min_context) -> float`
+  - `compute_retrospective_row(model, df_hourly, target_timestamp, max_horizon, context_window, min_context) -> dict[str, Any]`
+  - `evaluate_historical_range_cached(model, df_hourly, target_timestamps, max_horizon, context_window, min_context) -> pd.DataFrame`
+- **Dataset Persistence (`crypto_forecast.eval.dataset`)**:
+  - `get_accuracy_eval_dir(output_dir) -> Path` (`/content/drive/MyDrive/Trader/accuracy_eval/` with local fallback)
+  - `inspect_latest_recorded_timestamp(csv_path) -> pd.Timestamp | None`
+  - `identify_pending_timestamps(df_hourly, latest_ts, min_context_window, max_lookback_horizon, initial_backfill_hours) -> list[pd.Timestamp]`
+  - `persist_accuracy_dataset(df_new, csv_path) -> pd.DataFrame`
+- **Pipeline Coordinator (`crypto_forecast.eval.pipeline`)**:
+  - `run_accuracy_evaluation(pairs, models, output_dir, initial_backfill_hours, max_horizon, context_window, force_fallback, df_ohlcv_map, verbose) -> dict[str, Path]`
+
 ## Code Layout
 ```
 d:\code\trade\
@@ -157,7 +188,8 @@ d:\code\trade\
 │   └── workflows/
 │       └── ci.yml                 # Remote CI workflow
 ├── notebooks/
-│   └── colab_runner.ipynb         # 1-Click Colab notebook with "Open in Colab" badge
+│   ├── colab_runner.ipynb         # 1-Click Colab notebook with "Open in Colab" badge
+│   └── accuracy_eval.ipynb        # Clean headless Colab accuracy evaluation notebook
 ├── src/
 │   └── crypto_forecast/
 │       ├── __init__.py
@@ -183,6 +215,12 @@ d:\code\trade\
 │       │   ├── metrics.py         # Vectorized MAE, RMSE, sMAPE, Hit-Rate
 │       │   ├── backtester.py      # Rolling walk-forward backtesting engine
 │       │   └── compatibility.py   # Asset-to-model compatibility evaluator
+│       ├── eval/
+│       │   ├── __init__.py        # Accuracy evaluation exports
+│       │   ├── schemas.py         # 50-col schema, aliases, file naming
+│       │   ├── retrospective.py   # 48h lookback math, step k extraction, caching
+│       │   ├── dataset.py         # Drive persistence, incremental state resume
+│       │   └── pipeline.py        # Multi-pair multi-model evaluation coordinator
 │       └── web/
 │           ├── __init__.py
 │           ├── app.py             # Gradio Blocks UI entry point with CSV download
@@ -192,7 +230,8 @@ d:\code\trade\
 ├── scripts/
 │   ├── run_benchmark.py           # Headless benchmark CLI runner
 │   ├── run_forecast.py            # Headless forecasting CLI runner
-│   └── launch_gui.py              # Web GUI launcher (Gradio share=True)
+│   ├── launch_gui.py              # Web GUI launcher (Gradio share=True)
+│   └── verify_accuracy_eval.py    # Standalone headless accuracy verification script
 ├── tests/
 │   ├── unit/                      # Fast local/Colab unit tests
 │   │   ├── test_ingestion.py
@@ -200,11 +239,13 @@ d:\code\trade\
 │   │   ├── test_sentiment.py
 │   │   ├── test_models.py
 │   │   ├── test_metrics.py
-│   │   └── test_web.py
+│   │   ├── test_web.py
+│   │   └── test_accuracy_eval.py  # Unit tests for M8 accuracy evaluation
 │   └── e2e/                       # Full-system opaque-box integration tests
 │       ├── test_multi_horizon.py
 │       ├── test_compatibility.py
-│       └── test_colab_runner.py
+│       ├── test_colab_runner.py
+│       └── test_accuracy_eval_pipeline.py  # E2E tests for notebook & pipeline
 ├── pyproject.toml
 ├── requirements.txt
 ├── README.md
